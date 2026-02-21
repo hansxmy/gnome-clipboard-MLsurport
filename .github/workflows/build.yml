@@ -1,0 +1,42 @@
+name: Build Extension ZIP
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+    branches: [main]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: sudo apt-get update && sudo apt-get install -y libglib2.0-dev zip
+
+      - name: Compile schemas
+        run: glib-compile-schemas --strict --targetdir=schemas schemas
+
+      - name: Build ZIP
+        run: |
+          UUID="clipboard-indicator@tudmotu.com"
+          FILES="extension.js prefs.js registry.js sync.js keyboard.js constants.js locale.js stylesheet.css metadata.json"
+          zip -j "${UUID}.shell-extension.zip" $FILES
+          cd schemas && zip "../${UUID}.shell-extension.zip" gschemas.compiled *.xml
+          cd ..
+          echo "Built ${UUID}.shell-extension.zip"
+          ls -la "${UUID}.shell-extension.zip"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: clipboard-indicator-extension
+          path: '*.shell-extension.zip'
+
+      - name: Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: '*.shell-extension.zip'

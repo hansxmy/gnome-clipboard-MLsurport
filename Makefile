@@ -1,29 +1,22 @@
-MODULES = *.js locale/*/LC_MESSAGES/*.mo metadata.json stylesheet.css LICENSE.rst README.rst schemas/
-INSTALLPATH=~/.local/share/gnome-shell/extensions/clipboard-indicator@tudmotu.com/
+UUID = clipboard-indicator@tudmotu.com
+DIST_FILES = extension.js prefs.js registry.js sync.js keyboard.js constants.js locale.js stylesheet.css metadata.json
+SCHEMA_DIR = schemas
 
-all: compile-locales compile-settings
+.PHONY: all build install uninstall clean
 
-compile-settings:
-	glib-compile-schemas --strict --targetdir=schemas/ schemas
+all: build
 
-compile-locales:
-	$(foreach file, $(wildcard locale/*/LC_MESSAGES/*.po), \
-		msgfmt $(file) -o $(subst .po,.mo,$(file));)
+build:
+	glib-compile-schemas --strict --targetdir=$(SCHEMA_DIR) $(SCHEMA_DIR)
+	mkdir -p dist
+	cd . && zip -j dist/$(UUID).shell-extension.zip $(DIST_FILES) && cd $(SCHEMA_DIR) && zip ../dist/$(UUID).shell-extension.zip gschemas.compiled *.xml
 
-update-po-files:
-	xgettext -L Python --from-code=UTF-8 -k_ -kN_ -o clipboard-indicator.pot *.js
-	$(foreach file, $(wildcard locale/*/LC_MESSAGES/*.po), \
-		msgmerge $(file) clipboard-indicator.pot -o $(file);)
+install: build
+	gnome-extensions install --force dist/$(UUID).shell-extension.zip
 
-install: all
-	rm -rf $(INSTALLPATH)
-	mkdir -p $(INSTALLPATH)
-	cp -r $(MODULES) $(INSTALLPATH)/
+uninstall:
+	gnome-extensions uninstall $(UUID)
 
-nested-session:
-	dbus-run-session -- env MUTTER_DEBUG_NUM_DUMMY_MONITORS=1 \
-		MUTTER_DEBUG_DUMMY_MODE_SPECS=2048x1536 \
-		MUTTER_DEBUG_DUMMY_MONITOR_SCALES=2 gnome-shell --nested --wayland
-
-bundle: all
-	zip -FSr bundle.zip $(MODULES)
+clean:
+	rm -rf dist
+	rm -f $(SCHEMA_DIR)/gschemas.compiled
