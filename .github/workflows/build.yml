@@ -22,12 +22,12 @@ jobs:
       - name: Build ZIP
         run: |
           UUID="clipboard-indicator@tudmotu.com"
-          FILES="extension.js prefs.js registry.js sync.js keyboard.js constants.js locale.js stylesheet.css metadata.json"
+          FILES="extension.js prefs.js registry.js sync.js keyboard.js constants.js locale.js logger.js stylesheet.css metadata.json"
           zip -j "${UUID}.shell-extension.zip" $FILES
-          cd schemas && zip "../${UUID}.shell-extension.zip" gschemas.compiled *.xml
-          cd ..
+          zip -r "${UUID}.shell-extension.zip" schemas/gschemas.compiled schemas/*.xml
+          zip -r "${UUID}.shell-extension.zip" locale/
           echo "Built ${UUID}.shell-extension.zip"
-          ls -la "${UUID}.shell-extension.zip"
+          unzip -l "${UUID}.shell-extension.zip"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
