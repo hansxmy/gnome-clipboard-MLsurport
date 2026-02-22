@@ -205,17 +205,7 @@ const ClipboardIndicator = GObject.registerClass({
             this._selectMenuItem(this.clipItemsRadioGroup[clipHistory.length - 1]);
         }
 
-        // Timer display: only tick when menu is visible (saves CPU/battery)
-        this.menu.connect('open-state-changed', (_menu, isOpen) => {
-            if (isOpen && AUTO_CLEAR_HOURS > 0 && NEXT_CLEAR_TIME > 0) {
-                this._updateTimer();
-                if (!this._timerIntervalId)
-                    this._timerIntervalId = setInterval(() => this._updateTimer(), 1000);
-            } else if (this._timerIntervalId) {
-                clearInterval(this._timerIntervalId);
-                this._timerIntervalId = null;
-            }
-        });
+        // Auto-clear runs silently — no visible countdown needed
 
         this._updateEmptyState();
         this._menuReady = true;
@@ -565,7 +555,6 @@ const ClipboardIndicator = GObject.registerClass({
         );
 
         if (this._clearTimeoutId) { clearTimeout(this._clearTimeoutId); this._clearTimeoutId = null; }
-        if (this._timerIntervalId) { clearInterval(this._timerIntervalId); this._timerIntervalId = null; }
 
         if (AUTO_CLEAR_HOURS <= 0) {
             if (this.timerLabel) this.timerLabel.visible = false;
@@ -573,7 +562,8 @@ const ClipboardIndicator = GObject.registerClass({
             return;
         }
 
-        if (this.timerLabel) this.timerLabel.visible = true;
+        // Keep timer label hidden — auto-clear works silently in background
+        if (this.timerLabel) this.timerLabel.visible = false;
         const now = Math.ceil(Date.now() / 1000);
 
         if (NEXT_CLEAR_TIME > 0 && NEXT_CLEAR_TIME < now) {
@@ -599,7 +589,6 @@ const ClipboardIndicator = GObject.registerClass({
 
     _scheduleNextClear () {
         if (this._clearTimeoutId) clearTimeout(this._clearTimeoutId);
-        if (this._timerIntervalId) clearInterval(this._timerIntervalId);
 
         if (AUTO_CLEAR_HOURS <= 0) {
             if (this.timerLabel) this.timerLabel.visible = false;
@@ -776,7 +765,6 @@ const ClipboardIndicator = GObject.registerClass({
     #clearTimeouts () {
         if (this._cacheWriteTimeout) { clearTimeout(this._cacheWriteTimeout); this._cacheWriteTimeout = null; }
         if (this._clearTimeoutId) clearTimeout(this._clearTimeoutId);
-        if (this._timerIntervalId) clearInterval(this._timerIntervalId);
         if (this._pasteKeypressTimeout) clearTimeout(this._pasteKeypressTimeout);
         if (this._pasteResetTimeout) clearTimeout(this._pasteResetTimeout);
         if (this._remoteHashTimeout) clearTimeout(this._remoteHashTimeout);

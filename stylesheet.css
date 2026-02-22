@@ -31,6 +31,7 @@
 /* History section */
 .ci-history-menu-section {
     max-height: 450px;
+    max-width: 300px;
 }
 
 .ci-history-menu-section .popup-menu-item {

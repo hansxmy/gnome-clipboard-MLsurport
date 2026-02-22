@@ -85,7 +85,9 @@ export class Registry {
     }
 
     getEntryFilename (entry) {
-        return `${this.REGISTRY_DIR}/${entry.asBytes().hash()}`;
+        // Use unsigned hash to avoid negative numbers in filenames
+        const h = entry.asBytes().hash() >>> 0;
+        return `${this.REGISTRY_DIR}/${h}`;
     }
 
     async getEntryAsImage (entry) {
@@ -131,10 +133,12 @@ export class Registry {
     clearCacheFolder () {
         try {
             const folder = Gio.file_new_for_path(this.REGISTRY_DIR);
-            const enumerator = folder.enumerate_children('', Gio.FileQueryInfoFlags.NOFOLLOW_SYMLINKS, null);
-            let file;
-            while ((file = enumerator.iterate(null)[2]) != null) {
-                file.delete(null);
+            const enumerator = folder.enumerate_children(
+                'standard::name', Gio.FileQueryInfoFlags.NOFOLLOW_SYMLINKS, null);
+            let info;
+            while ((info = enumerator.next_file(null)) != null) {
+                const child = folder.get_child(info.get_name());
+                try { child.delete(null); } catch (e) { /* best-effort */ }
             }
         } catch (e) {
             console.error('Clipboard Indicator: clear cache error', e);
@@ -199,6 +203,11 @@ export class ClipboardEntry {
     rawBytes ()  { return this.#bytes; }
 
     equals (other) {
+        if (this.isImage() && other.isImage()) {
+            // Compare both hash and byte length to reduce collision risk
+            return this.asBytes().hash() === other.asBytes().hash() &&
+                   this.asBytes().get_size() === other.asBytes().get_size();
+        }
         return this.getStringValue() === other.getStringValue();
     }
 }
