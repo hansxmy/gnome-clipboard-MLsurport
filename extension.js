@@ -55,9 +55,9 @@ const ClipboardIndicator = GObject.registerClass({
     #lastReceivedHash = null;
 
     destroy () {
-        this._destroyed = true;
         this.logger.info('Extension destroy called');
         this._flushCache();
+        this._destroyed = true;
         this._disconnectSettings();
         this._unbindShortcuts();
         this._disconnectSelectionListener();
@@ -93,20 +93,20 @@ const ClipboardIndicator = GObject.registerClass({
 
         this._loadSettings();
 
-        // Build menu async, then set up listeners
+        // Build menu async, then set up listeners and sync module.
+        // _initSync() is intentionally inside the callback so D-Bus signals
+        // cannot arrive before the menu is ready (prevents event loss).
         this._buildMenu().then(() => {
             if (this._destroyed) return;
             this._setupListener();
             this._setupAutoClear();
-            this._updateSyncStatus(this.sync?.state || 'disconnected');
+            this._initSync();
+            this._updateSyncStatus(this.sync?.state ?? 'disconnected');
             this.logger.info('Extension initialized, history:', this.clipItemsRadioGroup.length, 'items');
         }).catch(e => {
             console.error('Clipboard Indicator: menu build failed', e);
             this.logger.error('Menu build failed', e);
         });
-
-        // Init sync module
-        this._initSync();
     }
 
     // ──────────────────────── Menu Construction ────────────────────────
@@ -168,7 +168,7 @@ const ClipboardIndicator = GObject.registerClass({
         // ── Bottom separator ──
         this.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
 
-        // ── Clear history button with timer ──
+        // ── Clear history button ──
         this.clearMenuItem = new PopupMenu.PopupMenuItem(tr('clear-history'));
         this.clearMenuItem.insert_child_at_index(
             new St.Icon({
@@ -177,13 +177,6 @@ const ClipboardIndicator = GObject.registerClass({
                 y_align: Clutter.ActorAlign.CENTER
             }), 0
         );
-        this.timerLabel = new St.Label({
-            text: '',
-            style: 'font-family: monospace;',
-            x_align: Clutter.ActorAlign.END,
-            x_expand: true
-        });
-        this.clearMenuItem.add_child(this.timerLabel);
         this.clearMenuItem.connect('activate', () => this._clearHistory());
         this.menu.addMenuItem(this.clearMenuItem);
 
@@ -307,7 +300,7 @@ const ClipboardIndicator = GObject.registerClass({
             AnimationUtils.ensureActorVisibleInScrollView(this.historyScrollView, menuItem);
         });
 
-        menuItem.actor.connect('key-press-event', (actor, event) => {
+        menuItem.connect('key-press-event', (actor, event) => {
             const sym = event.get_key_symbol();
             if (sym === Clutter.KEY_Delete) {
                 this.#focusNeighbor(menuItem);
@@ -342,7 +335,7 @@ const ClipboardIndicator = GObject.registerClass({
             y_expand: true
         });
         deleteBtn.connect('clicked', () => this._removeEntry(menuItem));
-        menuItem.actor.add_child(deleteBtn);
+        menuItem.add_child(deleteBtn);
 
         this.clipItemsRadioGroup.push(menuItem);
         this.historySection.addMenuItem(menuItem, 0);
@@ -368,13 +361,13 @@ const ClipboardIndicator = GObject.registerClass({
         } else if (entry.isImage()) {
             menuItem.label.set_text(`[${tr('image')}]`);
             this.registry.getEntryAsImage(entry).then(img => {
-                if (!img) return;
+                if (!img || this._destroyed) return;
                 img.add_style_class_name('clipboard-menu-img-preview');
                 if (menuItem.previewImage)
                     menuItem.remove_child(menuItem.previewImage);
                 menuItem.previewImage = img;
                 menuItem.insert_child_below(img, menuItem.label);
-            });
+            }).catch(e => console.debug('getEntryAsImage:', e));
         }
     }
 
@@ -458,7 +451,7 @@ const ClipboardIndicator = GObject.registerClass({
     #focusNeighbor (menuItem) {
         let idx = this.clipItemsRadioGroup.indexOf(menuItem);
         let next = this.clipItemsRadioGroup[idx - 1] || this.clipItemsRadioGroup[idx + 1];
-        if (next) next.actor.grab_key_focus();
+        if (next) next.grab_key_focus();
     }
 
     // ──────────────────────── Clipboard Listener ────────────────────────
@@ -469,7 +462,7 @@ const ClipboardIndicator = GObject.registerClass({
         this._selectionOwnerChangedId = this.selection.connect('owner-changed',
             (sel, type, _source) => {
                 if (type === Meta.SelectionType.SELECTION_CLIPBOARD)
-                    this._refreshIndicator();
+                    this._refreshIndicator().catch(e => console.error('refreshIndicator:', e));
             }
         );
     }
@@ -480,7 +473,7 @@ const ClipboardIndicator = GObject.registerClass({
 
         try {
             const entry = await this.#getClipboardContent();
-            if (!entry) return;
+            if (!entry || this._destroyed) return;
 
             // Content-based loop prevention
             const isFromRemote = this.#lastReceivedHash !== null &&
@@ -557,13 +550,10 @@ const ClipboardIndicator = GObject.registerClass({
         if (this._clearTimeoutId) { clearTimeout(this._clearTimeoutId); this._clearTimeoutId = null; }
 
         if (AUTO_CLEAR_HOURS <= 0) {
-            if (this.timerLabel) this.timerLabel.visible = false;
             this.extension.settings.set_int(PrefsFields.NEXT_CLEAR_TIME, -1);
             return;
         }
 
-        // Keep timer label hidden — auto-clear works silently in background
-        if (this.timerLabel) this.timerLabel.visible = false;
         const now = Math.ceil(Date.now() / 1000);
 
         if (NEXT_CLEAR_TIME > 0 && NEXT_CLEAR_TIME < now) {
@@ -579,19 +569,25 @@ const ClipboardIndicator = GObject.registerClass({
         this.extension.settings.set_int(PrefsFields.NEXT_CLEAR_TIME, NEXT_CLEAR_TIME);
 
         const remainMs = Math.max(0, (NEXT_CLEAR_TIME - now) * 1000);
+        // Cap at 24 h to avoid setTimeout 32-bit overflow (fires immediately
+        // when value > 2^31-1). _updateTimer re-checks on each tick.
+        const safeMs = Math.min(remainMs, 24 * 3600 * 1000);
         this._clearTimeoutId = setTimeout(() => {
-            this._clearHistory();
-            this._scheduleNextClear();
-        }, remainMs);
-
-        this._updateTimer();
+            const nowS = Math.ceil(Date.now() / 1000);
+            if (NEXT_CLEAR_TIME > 0 && NEXT_CLEAR_TIME <= nowS) {
+                this._clearHistory();
+                this._scheduleNextClear();
+            } else {
+                // Not yet expired — re-arm with capped delay
+                this._setupAutoClear();
+            }
+        }, safeMs);
     }
 
     _scheduleNextClear () {
         if (this._clearTimeoutId) clearTimeout(this._clearTimeoutId);
 
         if (AUTO_CLEAR_HOURS <= 0) {
-            if (this.timerLabel) this.timerLabel.visible = false;
             return;
         }
 
@@ -599,33 +595,16 @@ const ClipboardIndicator = GObject.registerClass({
         NEXT_CLEAR_TIME = now + AUTO_CLEAR_HOURS * 3600;
         this.extension.settings.set_int(PrefsFields.NEXT_CLEAR_TIME, NEXT_CLEAR_TIME);
 
+        const scheduleMs = Math.min(AUTO_CLEAR_HOURS * 3600 * 1000, 24 * 3600 * 1000);
         this._clearTimeoutId = setTimeout(() => {
-            this._clearHistory();
-            this._scheduleNextClear();
-        }, AUTO_CLEAR_HOURS * 3600 * 1000);
-
-        this._updateTimer();
-    }
-
-    _updateTimer () {
-        if (!this.timerLabel) return;
-        if (AUTO_CLEAR_HOURS <= 0 || NEXT_CLEAR_TIME <= 0) {
-            this.timerLabel.set_text('');
-            return;
-        }
-
-        let timeLeft = NEXT_CLEAR_TIME - Math.ceil(Date.now() / 1000);
-        if (timeLeft <= 0) { this.timerLabel.set_text(''); return; }
-
-        const h = Math.floor(timeLeft / 3600);
-        const m = Math.floor((timeLeft % 3600) / 60);
-        const s = timeLeft % 60;
-
-        let text = '';
-        if (h > 0) text += `${h}h `;
-        if (m > 0 || h > 0) text += `${m}m `;
-        text += `${s}s`;
-        this.timerLabel.set_text(text);
+            const nowS = Math.ceil(Date.now() / 1000);
+            if (NEXT_CLEAR_TIME > 0 && NEXT_CLEAR_TIME <= nowS) {
+                this._clearHistory();
+                this._scheduleNextClear();
+            } else {
+                this._setupAutoClear();
+            }
+        }, scheduleMs);
     }
 
     // ──────────────────────── Paste ────────────────────────
@@ -700,7 +679,7 @@ const ClipboardIndicator = GObject.registerClass({
 
         // Update sync module
         this.sync?.updateSettings({ enabled: SYNC_ENABLED });
-        this._updateSyncStatus(this.sync?.state);
+        this._updateSyncStatus(this.sync?.state ?? 'disconnected');
 
         // Update logger
         this.logger.setEnabled(ENABLE_LOGGING);
@@ -717,21 +696,19 @@ const ClipboardIndicator = GObject.registerClass({
         this.clearMenuItem?.label?.set_text(tr('clear-history'));
         this.settingsMenuItem?.label?.set_text(tr('settings'));
         if (this._emptyLabel) this._emptyLabel.set_text(tr('clipboard-empty'));
-        this._updateSyncStatus(this.sync?.state);
+        this._updateSyncStatus(this.sync?.state ?? 'disconnected');
     }
 
     // ──────────────────────── Shortcuts ────────────────────────
 
     _bindShortcuts () {
         this._unbindShortcuts();
-        var ModeType = Shell.hasOwnProperty('ActionMode') ?
-            Shell.ActionMode : Shell.KeyBindingMode;
 
         Main.wm.addKeybinding(
             PrefsFields.BINDING_TOGGLE_MENU,
             this.extension.settings,
             Meta.KeyBindingFlags.NONE,
-            ModeType.ALL,
+            Shell.ActionMode.ALL,
             () => this.menu.toggle()
         );
         this._shortcutsBindingIds.push(PrefsFields.BINDING_TOGGLE_MENU);
@@ -764,9 +741,9 @@ const ClipboardIndicator = GObject.registerClass({
 
     #clearTimeouts () {
         if (this._cacheWriteTimeout) { clearTimeout(this._cacheWriteTimeout); this._cacheWriteTimeout = null; }
-        if (this._clearTimeoutId) clearTimeout(this._clearTimeoutId);
-        if (this._pasteKeypressTimeout) clearTimeout(this._pasteKeypressTimeout);
-        if (this._pasteResetTimeout) clearTimeout(this._pasteResetTimeout);
-        if (this._remoteHashTimeout) clearTimeout(this._remoteHashTimeout);
+        if (this._clearTimeoutId) { clearTimeout(this._clearTimeoutId); this._clearTimeoutId = null; }
+        if (this._pasteKeypressTimeout) { clearTimeout(this._pasteKeypressTimeout); this._pasteKeypressTimeout = null; }
+        if (this._pasteResetTimeout) { clearTimeout(this._pasteResetTimeout); this._pasteResetTimeout = null; }
+        if (this._remoteHashTimeout) { clearTimeout(this._remoteHashTimeout); this._remoteHashTimeout = null; }
     }
 });

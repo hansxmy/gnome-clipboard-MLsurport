@@ -51,7 +51,6 @@ const _strings = {
     'enable-logging':       { en: 'Enable file logging',          zh_CN: '启用文件日志' },
     'enable-logging-desc':  { en: 'Write debug logs to ~/.cache/', zh_CN: '将调试日志写入 ~/.cache/' },
     'open-log-folder':      { en: 'Open log folder',              zh_CN: '打开日志目录' },
-    'no-log-yet':           { en: 'No log files yet',             zh_CN: '暂无日志文件' },
 };
 
 let _lang = null;

@@ -84,8 +84,41 @@ export class Logger {
     warn  (...args) { this.log('WARN',  ...args); }
     error (...args) { this.log('ERROR', ...args); }
 
-    /** Immediately write buffered lines to disk. */
+    /** Immediately write buffered lines to disk (non-blocking). */
     flush () {
+        if (this.#buffer.length === 0) return;
+
+        try {
+            GLib.mkdir_with_parents(this.#logDir, 0o755);
+            this.#rotate();
+        } catch (e) {
+            console.error('Clipboard Indicator logger: pre-flush error', e);
+            return;
+        }
+
+        const data = this.#buffer.join('');
+        this.#buffer.length = 0;
+
+        const file = Gio.file_new_for_path(this.#logPath);
+        const bytes = new GLib.Bytes(new TextEncoder().encode(data));
+
+        // Async I/O to avoid blocking the GNOME Shell main loop
+        file.append_to_async(Gio.FileCreateFlags.NONE, GLib.PRIORITY_DEFAULT, null, (obj, res) => {
+            try {
+                const stream = obj.append_to_finish(res);
+                stream.write_bytes_async(bytes, GLib.PRIORITY_DEFAULT, null, (s, r) => {
+                    try { s.write_bytes_finish(r); }
+                    catch (e) { console.error('Clipboard Indicator logger: write error', e); }
+                    finally { try { stream.close(null); } catch (_) {} }
+                });
+            } catch (e) {
+                console.error('Clipboard Indicator logger: flush error', e);
+            }
+        });
+    }
+
+    /** Synchronous flush — used only in destroy() to guarantee final data is written. */
+    _flushSync () {
         if (this.#buffer.length === 0) return;
 
         try {
@@ -96,18 +129,10 @@ export class Logger {
             this.#buffer.length = 0;
 
             const file = Gio.file_new_for_path(this.#logPath);
-            const flags = Gio.FileCreateFlags.NONE;
-            let stream;
-
-            if (file.query_exists(null)) {
-                stream = file.append_to(flags, null);
-            } else {
-                stream = file.create(flags, null);
-            }
+            const stream = file.append_to(Gio.FileCreateFlags.NONE, null);
             stream.write_all(new TextEncoder().encode(data), null);
             stream.close(null);
         } catch (e) {
-            // Last resort — dump to journal so we don't lose the info entirely
             console.error('Clipboard Indicator logger: flush error', e);
         }
     }
@@ -119,7 +144,7 @@ export class Logger {
             clearTimeout(this.#flushTimeoutId);
             this.#flushTimeoutId = null;
         }
-        this.flush();
+        this._flushSync();   // sync to guarantee data is written before unload
     }
 
     // ── Private ──

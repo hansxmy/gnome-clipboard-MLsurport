@@ -5,8 +5,8 @@ import St from 'gi://St';
 export class Registry {
     constructor (uuid) {
         this.uuid = uuid;
-        this.REGISTRY_DIR = GLib.get_user_cache_dir() + '/' + uuid;
-        this.REGISTRY_PATH = this.REGISTRY_DIR + '/registry.txt';
+        this.REGISTRY_DIR = GLib.build_filenamev([GLib.get_user_cache_dir(), uuid]);
+        this.REGISTRY_PATH = GLib.build_filenamev([this.REGISTRY_DIR, 'registry.txt']);
     }
 
     write (entries) {
@@ -16,12 +16,13 @@ export class Registry {
                 item.contents = entry.getStringValue();
             } else if (entry.isImage()) {
                 item.contents = this.getEntryFilename(entry);
-                this.writeEntryFile(entry);
+                this.writeEntryFile(entry).catch(e =>
+                    console.error('Failed to write entry file:', e));
             }
             return item;
         });
 
-        GLib.mkdir_with_parents(this.REGISTRY_DIR, parseInt('0775', 8));
+        GLib.mkdir_with_parents(this.REGISTRY_DIR, 0o775);
         const file = Gio.file_new_for_path(this.REGISTRY_PATH);
         const bytes = new GLib.Bytes(JSON.stringify(data));
 
@@ -32,8 +33,8 @@ export class Registry {
                     stream.write_bytes_async(bytes, GLib.PRIORITY_DEFAULT, null, (w, r) => {
                         try {
                             w.write_bytes_finish(r);
-                            stream.close(null);
                         } catch (e) { console.error(e); }
+                        finally { try { stream.close(null); } catch (_) {} }
                     });
                 } catch (e) { console.error(e); }
             });
@@ -48,7 +49,7 @@ export class Registry {
             const file = Gio.file_new_for_path(this.REGISTRY_PATH);
             const info = file.query_info('standard::size', Gio.FileQueryInfoFlags.NONE, null);
             if (info.get_size() > maxCacheMB * 1024 * 1024) {
-                console.log('Clipboard Indicator: cache file too large, resetting');
+                console.warn('Clipboard Indicator: cache file too large, resetting');
                 this.clearCacheFolder();
                 return [];
             }
@@ -87,7 +88,7 @@ export class Registry {
     getEntryFilename (entry) {
         // Use unsigned hash to avoid negative numbers in filenames
         const h = entry.asBytes().hash() >>> 0;
-        return `${this.REGISTRY_DIR}/${h}`;
+        return GLib.build_filenamev([this.REGISTRY_DIR, String(h)]);
     }
 
     async getEntryAsImage (entry) {
@@ -114,9 +115,9 @@ export class Registry {
                         stream.write_bytes_async(entry.asBytes(), GLib.PRIORITY_DEFAULT, null, (w, r) => {
                             try {
                                 w.write_bytes_finish(r);
-                                stream.close(null);
                                 resolve();
                             } catch (e) { reject(e); }
+                            finally { try { stream.close(null); } catch (_) {} }
                         });
                     } catch (e) { reject(e); }
                 });

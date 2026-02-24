@@ -41,8 +41,13 @@ const INTROSPECT_XML = `
   </interface>
 </node>`;
 
-const _nodeInfo  = Gio.DBusNodeInfo.new_for_xml(INTROSPECT_XML);
-const _ifaceInfo = _nodeInfo.lookup_interface(IFACE);
+let _nodeInfo, _ifaceInfo;
+try {
+    _nodeInfo  = Gio.DBusNodeInfo.new_for_xml(INTROSPECT_XML);
+    _ifaceInfo = _nodeInfo.lookup_interface(IFACE);
+} catch (e) {
+    console.error('MountLinkSync: failed to parse introspect XML:', e);
+}
 
 export class MountLinkSync {
     #proxy = null;
@@ -140,6 +145,7 @@ export class MountLinkSync {
             Gio.bus_unwatch_name(this.#nameWatcherId);
             this.#nameWatcherId = 0;
         }
+        this.#busConnection = null;
         this.#proxy = null;
     }
 
@@ -158,6 +164,10 @@ export class MountLinkSync {
 
     #onNameAppeared (connection) {
         if (this.#destroyed) return;
+        if (!_ifaceInfo) {
+            console.error('MountLinkSync: introspect info unavailable, cannot create proxy');
+            return;
+        }
         this.#unsubSignals();
         this.#busConnection = connection;
 
@@ -171,6 +181,7 @@ export class MountLinkSync {
             IFACE,
             null,
             (_obj, res) => {
+                if (this.#destroyed || !this.#enabled) return;
                 try {
                     this.#proxy = Gio.DBusProxy.new_finish(res);
                 } catch (e) {
@@ -178,7 +189,7 @@ export class MountLinkSync {
                     this.#setState('disconnected');
                     return;
                 }
-                if (this.#destroyed) { this.#proxy = null; return; }
+                if (this.#destroyed || !this.#enabled) { this.#proxy = null; return; }
 
                 // Subscribe to ClipboardReceived signal
                 this.#signalSubId = connection.signal_subscribe(
@@ -205,6 +216,7 @@ export class MountLinkSync {
     #onNameVanished () {
         if (this.#destroyed) return;
         this.#unsubSignals();
+        this.#busConnection = null;
         this.#proxy = null;
         if (this.#enabled) this.#setState('disconnected');
     }

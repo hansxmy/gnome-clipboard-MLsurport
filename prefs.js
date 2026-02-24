@@ -132,7 +132,7 @@ export default class ClipboardIndicatorPreferences extends ExtensionPreferences 
                 Gio.app_info_launch_default_for_uri(dir.get_uri(), null);
             } else {
                 // Show a transient toast-like info — just log to console for now
-                console.log('Clipboard Indicator: no log folder yet at', logDir);
+                console.debug('Clipboard Indicator: no log folder yet at', logDir);
             }
         });
         loggingGroup.add(openLogRow);
@@ -201,6 +201,8 @@ export default class ClipboardIndicatorPreferences extends ExtensionPreferences 
 
                 const shortcut = Gtk.accelerator_name_with_keycode(null, keyval, keycode, mask);
                 _debounceId = setTimeout(() => {
+                    _debounceId = null;
+                    if (!button.get_parent()) return;   // widget already destroyed
                     cleanupController();
                     settings.set_strv(pref, [shortcut]);
                     updateLabel();
