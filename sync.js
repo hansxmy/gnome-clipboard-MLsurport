@@ -23,6 +23,7 @@ import GLib from 'gi://GLib';
 const BUS_NAME = 'com.mountlink.ClipboardSync';
 const OBJ_PATH = '/com/mountlink/ClipboardSync';
 const IFACE    = 'com.mountlink.ClipboardSync';
+const ACTIVE_SEND_STATES = new Set(['connected', 'listening']);
 
 const MAX_SYNC_SIZE = 14 * 1024 * 1024; // ~10 MB decoded (base64 overhead)
 
@@ -92,7 +93,8 @@ export class MountLinkSync {
      * @param {Uint8Array} bytes
      */
     send (mimetype, bytes) {
-        if (!this.#proxy || this.#state === 'disabled') return;
+        if (!this.#proxy || !this.#enabled) return;
+        if (!ACTIVE_SEND_STATES.has(this.#state)) return;
         if (!bytes || !mimetype) return;
 
         try {
@@ -208,7 +210,7 @@ export class MountLinkSync {
 
                 // Read initial State from the proxy's property cache
                 const cachedState = this.#proxy.get_cached_property('State');
-                this.#setState(cachedState ? cachedState.get_string()[0] : 'connected');
+                this.#setState(cachedState ? cachedState.get_string()[0] : 'connecting');
             }
         );
     }
