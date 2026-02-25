@@ -13,6 +13,7 @@
  *   Method:  SendClipboard(mimetype: s, data: s)        ← extension calls
  *   Signal:  ClipboardReceived(mimetype: s, data: s)    ← ML emits
  *   Property: State (s)
+ *   Property: ErrorDetail (s)  — human-readable reason for error/stopped state
  *
  * All "data" values are base64-encoded raw bytes.
  */
@@ -39,6 +40,7 @@ const INTROSPECT_XML = `
       <arg name="data"     type="s"/>
     </signal>
     <property name="State" type="s" access="read"/>
+    <property name="ErrorDetail" type="s" access="read"/>
   </interface>
 </node>`;
 
@@ -54,6 +56,7 @@ export class MountLinkSync {
     #proxy = null;
     #enabled;
     #state = 'disconnected';
+    #errorDetail = '';
     #onClipboardReceived = null;
     #onStateChanged = null;
     #destroyed = false;
@@ -73,6 +76,7 @@ export class MountLinkSync {
     }
 
     get state () { return this.#state; }
+    get errorDetail () { return this.#errorDetail; }
 
     updateSettings ({ enabled }) {
         if (enabled === this.#enabled) return;
@@ -200,11 +204,13 @@ export class MountLinkSync {
                     (_c, _s, _p, _i, _sig, params) => this.#onSignal(params)
                 );
 
-                // Watch for State property changes
+                // Watch for State and ErrorDetail property changes
                 this.#propChangedId = this.#proxy.connect(
                     'g-properties-changed', (_proxy, changed, _inv) => {
                         const v = changed.lookup_value('State', null);
                         if (v) this.#setState(v.get_string()[0] || 'connected');
+                        const d = changed.lookup_value('ErrorDetail', null);
+                        if (d) this.#errorDetail = d.get_string()[0] || '';
                     }
                 );
 

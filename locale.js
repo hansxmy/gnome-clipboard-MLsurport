@@ -13,6 +13,8 @@ const _strings = {
     'sync-disconnected':    { en: 'MountLink: Disconnected',       zh_CN: 'MountLink: 未连接' },
     'sync-connecting':      { en: 'MountLink: Connecting...',      zh_CN: 'MountLink: 连接中...' },
     'sync-disabled':        { en: 'MountLink: Sync disabled',      zh_CN: 'MountLink: 同步已禁用' },
+    'sync-error':           { en: 'MountLink: Error',              zh_CN: 'MountLink: 错误' },
+    'sync-stopped':         { en: 'MountLink: Stopped',            zh_CN: 'MountLink: 已停止' },
 
     // Prefs - groups
     'general':              { en: 'General',                       zh_CN: '常规' },

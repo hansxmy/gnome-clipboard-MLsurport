@@ -239,7 +239,9 @@ const ClipboardIndicator = GObject.registerClass({
             'listening':    { text: tr('sync-listening'),    icon: 'network-receive-symbolic',          css: 'sync-connecting' },
             'connecting':   { text: tr('sync-connecting'),   icon: 'network-idle-symbolic',             css: 'sync-connecting' },
             'disconnected': { text: tr('sync-disconnected'), icon: 'network-offline-symbolic',          css: 'sync-disconnected' },
-            'disabled':     { text: tr('sync-disabled'),     icon: 'network-offline-symbolic',          css: 'sync-disabled' }
+            'disabled':     { text: tr('sync-disabled'),     icon: 'network-offline-symbolic',          css: 'sync-disabled' },
+            'error':        { text: tr('sync-error'),        icon: 'network-error-symbolic',            css: 'sync-disconnected' },
+            'stopped':      { text: tr('sync-stopped'),      icon: 'network-offline-symbolic',          css: 'sync-disconnected' }
         };
 
         const s = map[state] || map['disconnected'];
