@@ -24,7 +24,9 @@ export class Registry {
 
         GLib.mkdir_with_parents(this.REGISTRY_DIR, 0o775);
         const file = Gio.file_new_for_path(this.REGISTRY_PATH);
-        const bytes = new GLib.Bytes(JSON.stringify(data));
+        // TextEncoder produces UTF-8 bytes; GLib.Bytes(string) would use
+        // Latin-1 per-code-unit semantics and corrupt non-ASCII text.
+        const bytes = new GLib.Bytes(new TextEncoder().encode(JSON.stringify(data)));
 
         file.replace_async(null, false, Gio.FileCreateFlags.NONE,
             GLib.PRIORITY_DEFAULT, null, (obj, res) => {

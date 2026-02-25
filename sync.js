@@ -210,7 +210,8 @@ export class MountLinkSync {
 
                 // Read initial State from the proxy's property cache
                 const cachedState = this.#proxy.get_cached_property('State');
-                this.#setState(cachedState ? cachedState.get_string()[0] : 'connecting');
+                const initialState = cachedState ? (cachedState.get_string()[0] || 'connected') : 'connecting';
+                this.#setState(initialState);
             }
         );
     }

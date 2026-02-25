@@ -231,7 +231,7 @@ const ClipboardIndicator = GObject.registerClass({
     }
 
     _updateSyncStatus (state) {
-        if (!this._statusLabel) return;
+        if (!this._statusLabel || this._destroyed) return;
         this.logger.info('Sync state:', state);
 
         const map = {
@@ -362,6 +362,11 @@ const ClipboardIndicator = GObject.registerClass({
             menuItem.label.set_text(`[${tr('image')}]`);
             this.registry.getEntryAsImage(entry).then(img => {
                 if (!img || this._destroyed) return;
+                // menuItem may have been destroyed while the async load was
+                // in-flight (e.g. _removeEntry called between request & response).
+                // Calling remove_child/insert_child_below on a destroyed actor
+                // throws a GJS error, so bail out early.
+                if (!menuItem.get_parent()) return;
                 img.add_style_class_name('clipboard-menu-img-preview');
                 if (menuItem.previewImage)
                     menuItem.remove_child(menuItem.previewImage);
@@ -443,7 +448,9 @@ const ClipboardIndicator = GObject.registerClass({
 
     _flushCache () {
         if (this._cacheWriteTimeout) { clearTimeout(this._cacheWriteTimeout); this._cacheWriteTimeout = null; }
-        if (this._destroyed) return;
+        // Do not flush before menu is fully built — clipItemsRadioGroup would
+        // be empty and overwrite the persisted history with an empty list.
+        if (!this._menuReady || this._destroyed) return;
         const entries = this.clipItemsRadioGroup.map(item => item.entry);
         this.registry.write(entries);
     }
@@ -517,16 +524,22 @@ const ClipboardIndicator = GObject.registerClass({
         ];
 
         for (let type of mimetypes) {
-            let result = await new Promise(resolve => {
-                this.extension.clipboard.get_content(CLIPBOARD_TYPE, type, (cb, bytes) => {
-                    if (!bytes || bytes.get_size() === 0) { resolve(null); return; }
+            let result = await Promise.race([
+                new Promise(resolve => {
+                    this.extension.clipboard.get_content(CLIPBOARD_TYPE, type, (cb, bytes) => {
+                        if (!bytes || bytes.get_size() === 0) { resolve(null); return; }
 
-                    // Workaround: GNOME mangles mimetype on 2nd+ copy
-                    if (type === 'UTF8_STRING') type = 'text/plain;charset=utf-8';
+                        // Workaround: GNOME mangles mimetype on 2nd+ copy
+                        if (type === 'UTF8_STRING') type = 'text/plain;charset=utf-8';
 
-                    resolve(new ClipboardEntry(type, bytes.get_data()));
-                });
-            });
+                        resolve(new ClipboardEntry(type, bytes.get_data()));
+                    });
+                }),
+                // Safety timeout: if the clipboard owner crashes and the callback
+                // never fires, this prevents #refreshInProgress from being stuck
+                // true forever (which would permanently stall clipboard monitoring).
+                new Promise(resolve => setTimeout(() => resolve(null), 1500)),
+            ]);
             if (result) return result;
         }
         return null;
@@ -635,6 +648,9 @@ const ClipboardIndicator = GObject.registerClass({
 
             // Restore previous clipboard selection
             this._pasteResetTimeout = setTimeout(() => {
+                // #clearTimeouts() may have already fired during the 50 ms
+                // gap between _pasteKeypressTimeout and _pasteResetTimeout.
+                if (this._destroyed) return;
                 if (selected && selected.entry) {
                     this.extension.clipboard.set_content(
                         CLIPBOARD_TYPE, selected.entry.mimetype(), selected.entry.asBytes()
@@ -670,6 +686,9 @@ const ClipboardIndicator = GObject.registerClass({
     }
 
     _onSettingsChange () {
+        // Guard: menu may still be building on first async load;
+        // flushing here would write an empty registry and wipe history.
+        if (!this._menuReady) return;
         this._fetchSettings();
         this._removeOldestEntries();
         this._updateCache();
