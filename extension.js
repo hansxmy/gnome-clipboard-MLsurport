@@ -36,7 +36,10 @@ export default class ClipboardIndicatorExtension extends Extension {
         this.clipboardIndicator = new ClipboardIndicator({
             clipboard: St.Clipboard.get_default(),
             settings: this.getSettings(),
-            openSettings: this.openPreferences,
+            // Use arrow function to keep correct `this` binding — passing
+            // `this.openPreferences` directly would lose the Extension context
+            // and make GNOME fail to open the prefs window.
+            openSettings: () => this.openPreferences(),
             uuid: this.uuid
         });
         Main.panel.addToStatusArea('clipboardIndicator', this.clipboardIndicator, 1);
@@ -232,8 +235,12 @@ const ClipboardIndicator = GObject.registerClass({
     }
 
     _updateSyncStatus (state) {
-        if (!this._statusLabel || this._destroyed) return;
         this.logger.info('Sync state:', state);
+        this._updateSyncUI(state);
+    }
+
+    _updateSyncUI (state) {
+        if (!this._statusLabel || this._destroyed) return;
 
         const map = {
             'connected':    { text: tr('sync-connected'),    icon: 'network-transmit-receive-symbolic', css: 'sync-connected' },
@@ -701,7 +708,7 @@ const ClipboardIndicator = GObject.registerClass({
 
         // Update sync module
         this.sync?.updateSettings({ enabled: SYNC_ENABLED });
-        this._updateSyncStatus(this.sync?.state ?? 'disconnected');
+        this._updateSyncUI(this.sync?.state ?? 'disconnected');
 
         // Update logger
         this.logger.setEnabled(ENABLE_LOGGING);
@@ -718,7 +725,7 @@ const ClipboardIndicator = GObject.registerClass({
         this.clearMenuItem?.label?.set_text(tr('clear-history'));
         this.settingsMenuItem?.label?.set_text(tr('settings'));
         if (this._emptyLabel) this._emptyLabel.set_text(tr('clipboard-empty'));
-        this._updateSyncStatus(this.sync?.state ?? 'disconnected');
+        this._updateSyncUI(this.sync?.state ?? 'disconnected');
     }
 
     // ──────────────────────── Shortcuts ────────────────────────
