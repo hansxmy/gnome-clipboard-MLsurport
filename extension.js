@@ -101,7 +101,8 @@ const ClipboardIndicator = GObject.registerClass({
             this._setupListener();
             this._setupAutoClear();
             this._initSync();
-            this._updateSyncStatus(this.sync?.state ?? 'disconnected');
+            // onStateChanged callback in _initSync fires _updateSyncStatus
+            // synchronously, so no separate call is needed here.
             this.logger.info('Extension initialized, history:', this.clipItemsRadioGroup.length, 'items');
         }).catch(e => {
             console.error('Clipboard Indicator: menu build failed', e);
